@@ -12,10 +12,10 @@ const details = () => ({
     When setting the re-encode bitrate filter be aware that it is a file total bitrate, so leave overhead for audio.
 This plugin implements the filter_by_stream_tag plugin to prevent infinite loops caused by reprocessing files above the filter or target bitrate.
 By default, all settings are ideal for most use cases.
-Version 1.2: Fixed h264_cuvid initialization error for 8-bit H.264 sources by allowing FFmpeg to auto-select decoder.`,
+Version 1.3: Corrected FFmpeg command structure for input/output options. Fixed h264_cuvid initialization error.`,
   //    Original plugin created by tws101 who was inspired by DOOM and MIGZ
   //    This version edited by /u/purpan
-  Version: '1.2',
+  Version: '1.3',
   Tags: 'pre-processing,ffmpeg,nvenc h265, hdr',
   Inputs: [
     {
@@ -235,7 +235,9 @@ class Configurator {
     this.inputSettings = [];
   }
   AddInputSetting(configuration) {
-    this.inputSettings.push(configuration);
+    if (configuration && configuration.trim() !== '') {
+        this.inputSettings.push(configuration);
+    }
   }
   AddOutputSetting(configuration) {
     this.shouldProcess = true;
@@ -319,7 +321,7 @@ function checkHDRMetadata(stream, id, inputs, logger, configuration) {
 * Video, Map EVERYTHING and encode video streams to 265
 */
 function buildVideoConfiguration(inputs, file, logger) {
-  const configuration = new Configurator(['-map 0']);
+  const configuration = new Configurator(['-map 0']); // -map 0 is an output option
   const tiered = {
     '480p': {
       bitrate: inputs.target_bitrate_480p576p,
@@ -352,26 +354,27 @@ function buildVideoConfiguration(inputs, file, logger) {
       cq: 24,
     },
   };
-  const inputSettings = {
+  // These are HWAccel decoders, thus input options
+  const inputDecoderSettings = {
     h263: '-c:v h263_cuvid',
     h264: '', // Allow FFmpeg to auto-select decoder for H264
-    mjpeg: 'c:v mjpeg_cuvid',
+    mjpeg: '-c:v mjpeg_cuvid',
     mpeg1: '-c:v mpeg1_cuvid',
     mpeg2: '-c:v mpeg2_cuvid',
     vc1: '-c:v vc1_cuvid',
     vp8: '-c:v vp8_cuvid',
     vp9: '-c:v vp9_cuvid',
   };
+
   function videoProcess(stream, id) {
     if (stream.codec_name === 'mjpeg') {
-      configuration.AddOutputSetting(`-map -v:${id}`);
+      configuration.AddOutputSetting(`-map -v:${id}`); // Output option
       return;
     }
     if (!checkHDRMetadata(stream, id, inputs, logger, configuration)) {
-  // If HDR detected and reconvert_hdr is false, skip encoding
       return;
     }
-    // Return if a re-encode is not needed
+
     const filterBitrate480 = (inputs.hevc_480p_576p_filter_bitrate * 1000);
     const filterBitrate720 = (inputs.hevc_720p_filter_bitrate * 1000);
     const filterBitrate1080 = (inputs.hevc_1080p_filter_bitrate * 1000);
@@ -383,23 +386,26 @@ function buildVideoConfiguration(inputs, file, logger) {
     const res720p = '720p';
     const res1080p = '1080p';
     const res4k = '4KUHD';
+
     if (reconvert === false) {
       if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
         logger.AddSuccess(`Video stream ${id} is hevc, and hevc reconvert is off`);
         return;
       }
     }
-function reconvertcheck(filterbitrate, res, res2) {
-  if ((filterbitrate > 0) && ((fileResolution === res) || (fileResolution === res2))) {
-        if ((stream.codec_name === 'hevc' || stream.codec_name === 'vp9') && (file.bit_rate < filterbitrate)) {
-        logger.AddSuccess(`Video stream ${id} bitrate is below the HEVC/VP9 filter criteria: Bitrate Criteria (${filterbitrate} kbps) > File Bitrate (${file.bit_rate} kbps)`);
-        return true;
-      } else if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
-        logger.Add(`Video stream ${id} is HEVC/VP9 and its bitrate (${file.bit_rate} kbps) is above filter (${filterbitrate} kbps)`);
-        }
-      }
-      return false;
-}
+
+    function reconvertcheck(filterbitrate, res, res2) {
+      if ((filterbitrate > 0) && ((fileResolution === res) || (fileResolution === res2))) {
+            if ((stream.codec_name === 'hevc' || stream.codec_name === 'vp9') && (file.bit_rate < filterbitrate)) {
+            logger.AddSuccess(`Video stream ${id} bitrate is below the HEVC/VP9 filter criteria: Bitrate Criteria (${filterbitrate} kbps) > File Bitrate (${file.bit_rate} kbps)`);
+            return true;
+          } else if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
+            logger.Add(`Video stream ${id} is HEVC/VP9 and its bitrate (${file.bit_rate} kbps) is above filter (${filterbitrate} kbps)`);
+            }
+          }
+          return false;
+    }
+
     const bool480 = reconvertcheck(filterBitrate480, res480p, res576p);
     const bool720 = reconvertcheck(filterBitrate720, res720p);
     const bool1080 = reconvertcheck(filterBitrate1080, res1080p);
@@ -407,11 +413,10 @@ function reconvertcheck(filterbitrate, res, res2) {
     if (bool480 === true || bool720 === true || bool1080 === true || bool4k === true) {
       return;
     }
-    // remove png streams.
+
     if (stream.codec_name === 'png') {
-      configuration.AddOutputSetting(`-map -0:v:${id}`);
+      configuration.AddOutputSetting(`-map -0:v:${id}`); // Output option
     } else {
-      // Setup required variables to transcode
       const bitrateProbe = (calculateBitrate(file) / 1000);
       let bitrateTarget = 0;
       const tier = tiered[file.video_resolution];
@@ -427,18 +432,24 @@ function reconvertcheck(filterbitrate, res, res2) {
       }
       const bitrateMax = bitrateTarget + tier.max_increase;
       const { cq } = tier;
-      // transcode all video streams that made it this far
-      configuration.AddOutputSetting(`-c:v hevc_nvenc -profile:v main10 -pix_fmt:v p010le -qmin 0 -cq:v ${cq} -b:v ${bitrateTarget}k -maxrate:v ${bitrateMax}k -preset slow -rc-lookahead 32 -spatial_aq:v 1 -aq-strength:v 15 -metadata:s:v:0 COPYRIGHT=processed`);
 
-      const decoderSetting = inputSettings[file.video_codec_name];
-      if (decoderSetting !== undefined) {
+      // Add output video encoding settings
+      configuration.AddOutputSetting(`-c:v hevc_nvenc -profile:v main10 -pix_fmt:v p010le -qmin 0 -cq:v ${cq} -b:v ${bitrateTarget}k -maxrate:v ${bitrateMax}k -preset slow -rc-lookahead 32 -spatial_aq:v 1 -aq-strength:v 15 -metadata:s:v:0 COPYRIGHT=processed`);
+      
+      // Add input decoder settings if specified
+      const decoderSetting = inputDecoderSettings[file.video_codec_name];
+      if (decoderSetting !== undefined && decoderSetting.trim() !== '') {
           configuration.AddInputSetting(decoderSetting);
       }
+      // The specific h264_cuvid logic that caused issues was removed previously.
+      // Now relying on inputDecoderSettings['h264'] = '' for auto-selection.
 
       logger.Add(`Transcoding stream ${id} to HEVC using NVidia NVENC`);
     }
   }
+
   loopOverStreamsOfType(file, 'video', videoProcess);
+
   if (!configuration.shouldProcess) {
     logger.AddSuccess('No video processing necessary');
   }
@@ -448,14 +459,14 @@ function reconvertcheck(filterbitrate, res, res2) {
 * Audio, set audio to copy
 */
 function buildAudioConfiguration(inputs, file, logger) {
-  const configuration = new Configurator(['-c:a copy']);
+  const configuration = new Configurator(['-c:a copy']); // Output option
   return configuration;
 }
 /**
 * Subtitles, set subs to copy
 */
 function buildSubtitleConfiguration(inputs, file, logger) {
-  const configuration = new Configurator(['-c:s copy']);
+  const configuration = new Configurator(['-c:s copy']); // Output option
   return configuration;
 }
 function checkTags(file, inputs) {
@@ -543,29 +554,37 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     response.infoLog += logger.GetLogData();
     return response;
   }
-  const videoSettings = buildVideoConfiguration(inputs, file, logger);
-  const audioSettings = buildAudioConfiguration(inputs, file, logger);
-  const subtitleSettings = buildSubtitleConfiguration(inputs, file, logger);
 
-  let inputSettingsString = videoSettings.GetInputSettings();
-  if (inputSettingsString && inputSettingsString.trim() !== '') {
-    response.preset = `${inputSettingsString},${videoSettings.GetOutputSettings()}`;
-  } else {
-    response.preset = videoSettings.GetOutputSettings();
+  const videoSettings = buildVideoConfiguration(inputs, file, logger);
+  const audioSettings = buildAudioConfiguration(inputs, file, logger); // Primarily output settings
+  const subtitleSettings = buildSubtitleConfiguration(inputs, file, logger); // Primarily output settings
+
+  // Start with input-specific options
+  // -analyzeduration and -probesize are input options
+  let inputOptions = '-analyzeduration 2147483647 -probesize 2147483647';
+  const videoInputSettings = videoSettings.GetInputSettings();
+  if (videoInputSettings && videoInputSettings.trim() !== '') {
+    inputOptions += ` ${videoInputSettings}`;
+  }
+
+  // Consolidate all output options
+  let outputOptions = videoSettings.GetOutputSettings();
+  outputOptions += ` ${audioSettings.GetOutputSettings()}`;
+  outputOptions += ` ${subtitleSettings.GetOutputSettings()}`;
+  outputOptions += ' -max_muxing_queue_size 9999'; // This is an output option
+
+  // b frames argument (output option)
+  if (inputs.bframes === true) {
+    outputOptions += ' -bf 2 -b_ref_mode middle';
   }
   
-  response.preset += `${audioSettings.GetOutputSettings()}`;
-  response.preset += `${subtitleSettings.GetOutputSettings()}`;
-  response.preset += ' -max_muxing_queue_size 9999';
-  // b frames argument
-  if (inputs.bframes === true) {
-    response.preset += ' -bf 2 -b_ref_mode middle';
-  }
-  // fix probe size errors
-  response.preset += ' -analyzeduration 2147483647 -probesize 2147483647';
+  // Construct the preset string: INPUT_OPTIONS,OUTPUT_OPTIONS
+  // Ensure there's always a comma, even if inputOptions is just the probesize/analyzeduration
+  response.preset = `${inputOptions.trim()},${outputOptions.trim()}`;
+
   response.processFile = videoSettings.shouldProcess;
   if (!response.processFile) {
-logger.AddSuccess('No need to process file');
+    logger.AddSuccess('No need to process file');
   }
   response.infoLog += logger.GetLogData();
   return response;
