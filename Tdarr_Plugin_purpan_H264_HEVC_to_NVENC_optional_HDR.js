@@ -364,6 +364,7 @@ function buildVideoConfiguration(inputs, file, logger) {
     vc1: '-c:v vc1_cuvid',
     vp8: '-c:v vp8_cuvid',
     vp9: '-c:v vp9_cuvid',
+    hevc: '-c:v hevc_cuvid',
   };
 
   function videoProcess(stream, id) {
