@@ -1,4 +1,4 @@
-# purpan's H264/HEVC to NVENC with Optional HDR
+# purpan's H264/HEVC to VAAPI with Optional HDR
 
 This utilizes code from multiple other plugins, but it's but mostly built off of [tws101's Ultimate_GPU_Transcoder_HDR](https://github.com/HaveAGitGat/Tdarr_Plugins/blob/4e0dd002c249247d338bf52c0595df917532eca7/Community/Tdarr_Plugin_tws101_Ultimate_GPU_Transcoder_HDR.js) plugin. I heavily tweaked it for higher quality encodes with even smaller sizes, added the tagging function, changed HDR to be optional, and made some other various edits, but most of the credit goes to them.
 
@@ -9,8 +9,8 @@ Click the file name above and hit the download button. Place the plugin in (main
 
 ## Description
 
-This plugin will transcode H264 or reconvert HEVC files using NVENC with bframes, 10bit, and (optional) HDR. Requires a Turing NVIDIA GPU or newer. 
-If reconvert HEVC is on and the entire file is over the bitrate filter, the HEVC stream will be re-encoded. Typically results in a 20-55% smaller size with very little quality loss.
+This plugin will transcode H264 or reconvert HEVC files using VAAPI with bframes, 10bit, and (optional) HDR. Requires Intel Quick Sync Video or AMD VCE hardware acceleration. 
+If reconvert HEVC is on and the entire file is over the bitrate filter, the HEVC stream will be re-encoded. Typically results in a 50-75% smaller size with little to no quality loss.
 
 This plugin is designed for processing entire movie libraries, HDR content and all. **However, it's not recommended you actually use this to reconvert HDR files as it strips some HDR10/+/Dolby Vision metadata and leaves just PQ. The reconvert_hdr option is more meant to filter out these files rather than actually convert them.**
 
