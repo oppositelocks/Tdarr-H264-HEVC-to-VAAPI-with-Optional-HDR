@@ -1,22 +1,22 @@
 /* eslint-disable */
 // tdarrSkipTest
 const details = () => ({
-  id: 'Tdarr_Plugin_purpan_H264_HEVC_to_NVENC_optional_HDR',
+  id: 'Tdarr_Plugin_purpan_H264_HEVC_to_VAAPI_optional_HDR',
   Stage: 'Pre-processing',
-  Name: 'purpan- H264/HEVC to NVENC with Optional HDR',
+  Name: 'purpan- H264/HEVC to VAAPI with Optional HDR',
   Type: 'Video',
   Operation: 'Transcode',
   Description:
-    `This  plugin will transcode H264 or reconvert HEVC files using NVENC with bframes, 10bit, and (optional) HDR. Requires a Turing NVIDIA GPU or newer.  
+    `This  plugin will transcode H264 or reconvert HEVC files using VAAPI with bframes, 10bit, and (optional) HDR. Requires Intel Quick Sync Video or AMD VCE hardware acceleration.  
     If reconvert HEVC is on and the entire file is over the bitrate filter, the HEVC stream will be re-encoded. Typically results in a 50-75% smaller size with little to no quality loss.
     When setting the re-encode bitrate filter be aware that it is a file total bitrate, so leave overhead for audio.
 This plugin implements the filter_by_stream_tag plugin to prevent infinite loops caused by reprocessing files above the filter or target bitrate.
 By default, all settings are ideal for most use cases.
-Version 1.3: Corrected FFmpeg command structure for input/output options. Fixed h264_cuvid initialization error.`,
+Version 1.4: Modified to use VAAPI hardware acceleration instead of NVENC.`,
   //    Original plugin created by tws101 who was inspired by DOOM and MIGZ
   //    This version edited by /u/purpan
-  Version: '1.3',
-  Tags: 'pre-processing,ffmpeg,nvenc h265, hdr',
+  Version: '1.4',
+  Tags: 'pre-processing,ffmpeg,vaapi h265, hdr',
   Inputs: [
     {
       name: 'target_bitrate_480p576p',
@@ -74,7 +74,7 @@ Version 1.3: Corrected FFmpeg command structure for input/output options. Fixed 
           'true',
         ],
       },
-      tooltip: 'Enables or disables bframes from being used. Sacrifices some detail for better compression. Requires NVIDIA Turing card or newer',
+      tooltip: 'Enables or disables bframes from being used. Sacrifices some detail for better compression. Requires VAAPI hardware acceleration support',
     },
 {
       name: 'reconvert_hevc',
@@ -356,16 +356,17 @@ function buildVideoConfiguration(inputs, file, logger) {
   };
   // These are HWAccel decoders, thus input options
   const inputDecoderSettings = {
-    h263: '-c:v h263_cuvid',
-    h264: '', // Allow FFmpeg to auto-select decoder for H264
-    mjpeg: '-c:v mjpeg_cuvid',
-    mpeg1: '-c:v mpeg1_cuvid',
-    mpeg2: '-c:v mpeg2_cuvid',
-    vc1: '-c:v vc1_cuvid',
-    vp8: '-c:v vp8_cuvid',
-    vp9: '-c:v vp9_cuvid',
-    hevc: '-c:v hevc_cuvid',
+    h263: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    h264: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    mjpeg: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    mpeg1: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    mpeg2: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    vc1: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    vp8: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    vp9: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
+    hevc: '-hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi',
   };
+
 
   function videoProcess(stream, id) {
     if (stream.codec_name === 'mjpeg') {
@@ -434,8 +435,8 @@ function buildVideoConfiguration(inputs, file, logger) {
       const bitrateMax = bitrateTarget + tier.max_increase;
       const { cq } = tier;
 
-      // Add output video encoding settings
-      configuration.AddOutputSetting(`-c:v hevc_nvenc -profile:v main10 -pix_fmt:v p010le -qmin 0 -cq:v ${cq} -b:v ${bitrateTarget}k -maxrate:v ${bitrateMax}k -preset slow -rc-lookahead 32 -spatial_aq:v 1 -aq-strength:v 15 -metadata:s:v:0 COPYRIGHT=processed`);
+      // Add output video encoding settings - VAAPI equivalent of original NVENC "slow" preset
+      configuration.AddOutputSetting(`-vf 'format=p010le,hwupload' -c:v hevc_vaapi -profile:v main10 -pix_fmt p010le -qmin 0 -qp ${cq} -b:v ${bitrateTarget}k -maxrate:v ${bitrateMax}k -compression_level 1 -quality 6 -low_power 0 -look_ahead 1 -idr_interval 250 -metadata:s:v:0 COPYRIGHT=processed`);
       
       // Add input decoder settings if specified
       const decoderSetting = inputDecoderSettings[file.video_codec_name];
@@ -445,7 +446,7 @@ function buildVideoConfiguration(inputs, file, logger) {
       // The specific h264_cuvid logic that caused issues was removed previously.
       // Now relying on inputDecoderSettings['h264'] = '' for auto-selection.
 
-      logger.Add(`Transcoding stream ${id} to HEVC using NVidia NVENC`);
+      logger.Add(`Transcoding stream ${id} to HEVC using VAAPI`);
     }
   }
 
@@ -574,9 +575,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
   outputOptions += ` ${subtitleSettings.GetOutputSettings()}`;
   outputOptions += ' -max_muxing_queue_size 9999'; // This is an output option
 
-  // b frames argument (output option)
+  // b frames argument (output option) - VAAPI doesn't support b_ref_mode
   if (inputs.bframes === true) {
-    outputOptions += ' -bf 2 -b_ref_mode middle';
+    outputOptions += ' -bf 2';
   }
   
   // Construct the preset string: INPUT_OPTIONS,OUTPUT_OPTIONS
