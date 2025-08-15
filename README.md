@@ -1,4 +1,4 @@
-# purpan's H264/HEVC to VAAPI with Optional HDR
+# A fork of purpan's H264/HEVC to VAAPI with Optional HDR updated to use VAAPI enabled devices 
 
 This utilizes code from multiple other plugins, but it's but mostly built off of [tws101's Ultimate_GPU_Transcoder_HDR](https://github.com/HaveAGitGat/Tdarr_Plugins/blob/4e0dd002c249247d338bf52c0595df917532eca7/Community/Tdarr_Plugin_tws101_Ultimate_GPU_Transcoder_HDR.js) plugin. I heavily tweaked it for higher quality encodes with even smaller sizes, added the tagging function, changed HDR to be optional, and made some other various edits, but most of the credit goes to them.
 
